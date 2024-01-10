@@ -3,6 +3,7 @@ package workerpool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,7 +71,7 @@ func NewWorkerPool(maxWorkers int, taskQueueSize int, timeout time.Duration) *Wo
 // worker is a method on the WorkerPool that processes tasks from the taskQueue.
 func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 	defer wp.wg.Done()
-	// defer // fmt.Printf("worker %d stopped\n", id)
+	// defer fmt.Printf("worker %d stopped\n", id)
 
 	for {
 		select {
@@ -79,18 +80,18 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 		case <-stopChan: // Check if this specific worker was told to stop
 			return
 		// case <-time.Tick(1 * time.Second):
-		// 	// fmt.Printf("worker %d is idle\n", id)
+		// 	fmt.Printf("worker %d is idle\n", id)
 		case task, ok := <-wp.publishers: // Wait for a task
 			if !ok {
 				// The publishers channel was closed, no more tasks will come
 				return
 			}
 			if task.Task != nil {
-				// fmt.Printf("worker %d is working on task %d\n", id, task.TaskId)
+				fmt.Printf("worker %d is working on task %d\n", id, task.TaskId)
 				result, err := task.Task()
 
 				if err != nil {
-					// fmt.Printf("worker %d error on task %d: %v\n", id, task.TaskId, err)
+					fmt.Printf("worker %d error on task %d: %v\n", id, task.TaskId, err)
 				}
 				// if result != nil {
 				// 	taskResult := SubmitResult{
@@ -104,7 +105,7 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 				// 		// Task sent successfully
 				// 	default:
 				// 		// Channel is full, handle the case when the channel is full
-				// 		// fmt.Println("resultChan is full, cannot send result")
+				// 		fmt.Println("resultChan is full, cannot send result")
 				// 	}
 				// }
 
@@ -126,7 +127,7 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 						break loop
 					default:
 						// Channel is full, handle the case when the channel is full
-						// fmt.Printf("worker %d stuck on sending task %d result, resultChan is full, cannot send result\n", id, task.TaskId)
+						fmt.Printf("worker %d stuck on sending task %d result, resultChan is full, cannot send result\n", id, task.TaskId)
 						panic("resultChan is full, cannot send result")
 					}
 				}
@@ -155,10 +156,10 @@ loop:
 			break loop
 		default:
 			// Channel is full, handle the case when the channel is full
-			// fmt.Println("publishers Channel is full, cannot send task")
+			fmt.Println("publishers Channel is full, cannot send task")
 		}
 	}
-	// fmt.Printf("worker pool submitted task %d\n", taskId)
+	fmt.Printf("worker pool submitted task %d\n", taskId)
 	return taskId, wp.resultChan, nil
 }
 

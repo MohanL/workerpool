@@ -23,21 +23,7 @@ func cloneGraph(node *Node, nodeNums int, goRoutines int) *Node {
 	visited.Store(node.Val, head_clone)
 	var wg sync.WaitGroup //use to synchronize all tasks
 
-	task := func() (interface{}, error) {
-		defer wg.Done()
-		cloneNodeNeighboursChan, err := dfsCloneWithWorkerPool(node, head_clone, &visited, &wg, wp)
-		return func() (interface{}, error) {
-			defer wg.Done()
-			for i := 0; i < len(head_clone.Neighbors); i++ {
-				head_clone.Neighbors[i] = <-cloneNodeNeighboursChan
-			}
-			close(cloneNodeNeighboursChan)
-			return nil, nil
-		}, err
-	}
-
-	wg.Add(1)
-	wp.Submit(task)
+	submitTasks(node, head_clone, &visited, &wg, wp)
 	wg.Wait()
 
 	processResults(wp, &wg)
@@ -46,17 +32,36 @@ func cloneGraph(node *Node, nodeNums int, goRoutines int) *Node {
 	return head_clone
 }
 
+func submitTasks(node *Node, clone *Node, visited *sync.Map, wg *sync.WaitGroup, wp *WorkerPool) {
+	task := func() (interface{}, error) {
+		defer wg.Done()
+		cloneNodeNeighboursChan, err := dfsCloneWithWorkerPool(node, clone, visited, wg, wp)
+		return func() (interface{}, error) {
+			defer wg.Done()
+			for i := 0; i < len(clone.Neighbors); i++ {
+				clone.Neighbors[i] = <-cloneNodeNeighboursChan
+			}
+			close(cloneNodeNeighboursChan)
+			return nil, nil
+		}, err
+	}
+
+	wg.Add(1)
+	wp.Submit(task)
+}
+
 func dfsCloneWithWorkerPool(node *Node, cloneNode *Node, visited *sync.Map, wg *sync.WaitGroup, wp *WorkerPool) (chan *Node, error) {
 	neighborsChan := make(chan *Node, len(node.Neighbors))
 	for _, neighbor := range node.Neighbors {
 		localNeighbor := neighbor
-		wg.Add(1)
-		wp.Submit(func() (interface{}, error) {
-			defer wg.Done()
-			neighborClone, loaded := visited.LoadOrStore(localNeighbor.Val, localNeighbor.Clone()) //cas
-			neighborsChan <- neighborClone.(*Node)
-			// // fmt.Printf("send neightbor clone %d to neighbour %d\n", neighborClone.(*Node).Val, node.Val)
-			if !loaded {
+		neighborClone, loaded := visited.LoadOrStore(localNeighbor.Val, localNeighbor.Clone()) //cas
+		neighborsChan <- neighborClone.(*Node)
+		if !loaded {
+			wg.Add(1)
+			wp.Submit(func() (interface{}, error) {
+				defer wg.Done()
+				// // fmt.Printf("send neightbor clone %d to neighbour %d\n", neighborClone.(*Node).Val, node.Val)
+
 				neighborCloneNeightborsChan, err := dfsCloneWithWorkerPool(localNeighbor, neighborClone.(*Node), visited, wg, wp)
 				return func() (interface{}, error) {
 					defer wg.Done()
@@ -66,9 +71,8 @@ func dfsCloneWithWorkerPool(node *Node, cloneNode *Node, visited *sync.Map, wg *
 					close(neighborCloneNeightborsChan)
 					return nil, nil
 				}, err
-			}
-			return nil, nil
-		})
+			})
+		}
 	}
 	return neighborsChan, nil
 }
