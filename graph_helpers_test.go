@@ -40,25 +40,9 @@ func cloneGraph(node *Node, nodeNums int, goRoutines int) *Node {
 	wp.Submit(task)
 	wg.Wait()
 
-loop:
-	for {
-		select {
-		case i := <-wp.resultChan:
-			if i.Error != nil {
-				panic(i.Error)
-			}
-			if i.Result != nil {
-				wg.Add(1)
-				wp.Submit(i.Result.(func() (interface{}, error)))
-			}
-		default:
-			// If no value ready, channel is drained and we can exit the loop
-			// fmt.Println("Channel is drained")
-			break loop
-		}
-	}
-
+	processResults(wp, &wg)
 	wg.Wait()
+
 	return head_clone
 }
 
@@ -87,4 +71,22 @@ func dfsCloneWithWorkerPool(node *Node, cloneNode *Node, visited *sync.Map, wg *
 		})
 	}
 	return neighborsChan, nil
+}
+
+// processResults processes the results from the worker pool.
+func processResults(wp *WorkerPool, wg *sync.WaitGroup) {
+	for {
+		select {
+		case i := <-wp.resultChan:
+			if i.Error != nil {
+				panic(i.Error) // Consider a better error handling strategy here.
+			}
+			if i.Result != nil {
+				wg.Add(1)
+				wp.Submit(i.Result.(func() (interface{}, error)))
+			}
+		default:
+			return
+		}
+	}
 }
