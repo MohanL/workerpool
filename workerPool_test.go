@@ -31,7 +31,12 @@ func TestWorkerPoolSubmit(t *testing.T) {
 	timeout := 10 * time.Second
 	taskNums := 100
 
-	workerPool := NewWorkerPool(maxWorkers, taskQueueSize, timeout)
+	workerPoolConfig := WorkerPoolConfig{
+		MaxWorkers:    maxWorkers,
+		Timeout:       timeout,
+		TaskQueueSize: taskQueueSize,
+	}
+	workerPool := NewWorkerPool(workerPoolConfig)
 	// TODO: task arguments setup
 	task := func() (interface{}, error) {
 		return "hello", nil

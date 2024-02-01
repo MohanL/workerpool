@@ -15,7 +15,13 @@ func cloneGraph(node *Node, nodeNums int, goRoutines int) *Node {
 	}
 
 	// fixed by queue size
-	wp := NewWorkerPool(goRoutines, nodeNums*nodeNums, 10*time.Second)
+
+	config := WorkerPoolConfig{
+		MaxWorkers:    goRoutines,
+		Timeout:       10 * time.Second,
+		TaskQueueSize: nodeNums * nodeNums,
+	}
+	wp := NewWorkerPool(config)
 	defer wp.Stop()
 
 	head_clone := node.Clone()
@@ -143,8 +149,13 @@ func minEdgeReversalsWithWorkerPool(n int, edges [][]int) []int {
 
 		return count
 	}
-
-	workerPool := NewWorkerPool(1, n*n*n, 10*time.Second)
+	config := WorkerPoolConfig{
+		MaxWorkers:    1,
+		Timeout:       10 * time.Second,
+		TaskQueueSize: n * n * n,
+		Logger:        &defaultLogger{},
+	}
+	workerPool := NewWorkerPool(config)
 
 	for i := 0; i < n; i++ {
 		nodeId := i
@@ -192,7 +203,13 @@ func minEdgeReversalsWithWorkerPoolV2(n int, edges [][]int) []int {
 		return count
 	}
 
-	workerPool := NewWorkerPool(10, n*n*n, 10*time.Second)
+	config := WorkerPoolConfig{
+		MaxWorkers:    10,
+		Timeout:       10 * time.Second,
+		TaskQueueSize: n * n * n,
+		Logger:        &defaultLogger{},
+	}
+	workerPool := NewWorkerPool(config)
 
 	for i := 0; i < n; i++ {
 		nodeId := i

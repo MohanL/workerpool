@@ -26,9 +26,21 @@ type SubmitResult struct {
 	Error  error
 }
 
+type Logger interface {
+	Log(message string)
+}
+
+type defaultLogger struct{}
+
+func (l *defaultLogger) Log(message string) {
+	fmt.Println(message)
+}
+
 type WorkerPoolConfig struct {
-	MaxWorkers int           // Maximum number of worker goroutines
-	Timeout    time.Duration // Maximum time to wait for task completion
+	MaxWorkers    int           // Maximum number of worker goroutines
+	Timeout       time.Duration // Maximum time to wait for task completion
+	TaskQueueSize int           // Use with Caution
+	Logger        Logger
 }
 
 type WorkerPool struct {
@@ -41,25 +53,29 @@ type WorkerPool struct {
 	workerStopChans []chan bool
 	taskId          atomic.Int64
 	resultChan      chan SubmitResult
+	logger          Logger
 }
 
-func NewWorkerPool(maxWorkers int, taskQueueSize int, timeout time.Duration) *WorkerPool {
+func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pool := &WorkerPool{
-		config: WorkerPoolConfig{
-			MaxWorkers: maxWorkers,
-			Timeout:    timeout,
-		},
+		config:          workerPoolConfig,
 		ctx:             ctx,
 		cancel:          cancel,
-		publishers:      make(chan TaskFuncWithId, taskQueueSize),
-		workerStopChans: make([]chan bool, maxWorkers),
+		publishers:      make(chan TaskFuncWithId, workerPoolConfig.TaskQueueSize),
+		workerStopChans: make([]chan bool, workerPoolConfig.MaxWorkers),
 		taskId:          atomic.Int64{},
-		resultChan:      make(chan SubmitResult, taskQueueSize),
+		resultChan:      make(chan SubmitResult, workerPoolConfig.TaskQueueSize),
 	}
 
-	for i := 0; i < maxWorkers; i++ {
+	if workerPoolConfig.Logger != nil {
+		pool.logger = workerPoolConfig.Logger
+	} else {
+		pool.logger = &defaultLogger{}
+	}
+
+	for i := 0; i < workerPoolConfig.MaxWorkers; i++ {
 		stopChan := make(chan bool)
 		pool.workerStopChans[i] = stopChan
 		pool.wg.Add(1)
@@ -71,14 +87,14 @@ func NewWorkerPool(maxWorkers int, taskQueueSize int, timeout time.Duration) *Wo
 // worker is a method on the WorkerPool that processes tasks from the taskQueue.
 func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 	defer wp.wg.Done()
-	// defer fmt.Printf("worker %d stopped\n", id)
+	defer wp.logger.Log(fmt.Sprintf("worker %d stopped\n", id))
 
 	for {
 		select {
 		case <-wp.ctx.Done(): // Check if context was cancelled (pool is stopping)
 			return
 		case <-time.After(wp.config.Timeout):
-			fmt.Printf("worker %d timed out\n", id)
+			wp.logger.Log(fmt.Sprintf("worker %d timed out\n", id))
 			return
 		case <-stopChan: // Check if this specific worker was told to stop
 			return
@@ -88,11 +104,11 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 				return
 			}
 			if task.Task != nil {
-				// fmt.Printf("worker %d is working on task %d\n", id, task.TaskId)
+				wp.logger.Log(fmt.Sprintf("worker %d is working on task %d\n", id, task.TaskId))
 				result, err := task.Task()
 
 				if err != nil {
-					fmt.Printf("worker %d error on task %d: %v\n", id, task.TaskId, err)
+					wp.logger.Log(fmt.Sprintf("worker %d error on task %d: %v\n", id, task.TaskId, err))
 				}
 
 				if result == nil {
@@ -113,7 +129,8 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 						break loop
 					default:
 						// Channel is full, handle the case when the channel is full
-						fmt.Printf("worker %d stuck on sending task %d result, resultChan is full, cannot send result\n", id, task.TaskId)
+						wp.logger.Log(fmt.Sprintf("worker %d stuck on sending task %d result, resultChan is full, cannot send result\n", id, task.TaskId))
+						// TODO: instead of panic what to do??
 						panic("resultChan is full, cannot send result")
 					}
 				}
@@ -142,10 +159,10 @@ loop:
 			break loop
 		default:
 			// Channel is full, handle the case when the channel is full
-			fmt.Println("publishers Channel is full, cannot send task")
+			wp.logger.Log("publishers Channel is full, cannot send task")
 		}
 	}
-	// fmt.Printf("worker pool submitted task %d\n", taskId)
+	wp.logger.Log(fmt.Sprintf("worker pool submitted task %d\n", taskId))
 	return taskId, wp.resultChan, nil
 }
 
