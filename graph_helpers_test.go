@@ -1,6 +1,7 @@
 package workerpool
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -33,21 +34,21 @@ func cloneGraph(node *Node, nodeNums int, goRoutines int) *Node {
 }
 
 func submitTasks(node *Node, clone *Node, visited *sync.Map, wg *sync.WaitGroup, wp *WorkerPool) {
-	task := func() (interface{}, error) {
+	wg.Add(1)
+	wp.Submit(func() (interface{}, error) {
 		defer wg.Done()
-		cloneNodeNeighboursChan, err := dfsCloneWithWorkerPool(node, clone, visited, wg, wp)
+		// // fmt.Printf("send neightbor clone %d to neighbour %d\n", neighborClone.(*Node).Val, node.Val)
+
+		neighborCloneNeightborsChan, err := dfsCloneWithWorkerPool(node, clone, visited, wg, wp)
 		return func() (interface{}, error) {
 			defer wg.Done()
 			for i := 0; i < len(clone.Neighbors); i++ {
-				clone.Neighbors[i] = <-cloneNodeNeighboursChan
+				clone.Neighbors[i] = <-neighborCloneNeightborsChan
 			}
-			close(cloneNodeNeighboursChan)
+			close(neighborCloneNeightborsChan)
 			return nil, nil
 		}, err
-	}
-
-	wg.Add(1)
-	wp.Submit(task)
+	})
 }
 
 func dfsCloneWithWorkerPool(node *Node, cloneNode *Node, visited *sync.Map, wg *sync.WaitGroup, wp *WorkerPool) (chan *Node, error) {
@@ -57,21 +58,7 @@ func dfsCloneWithWorkerPool(node *Node, cloneNode *Node, visited *sync.Map, wg *
 		neighborClone, loaded := visited.LoadOrStore(localNeighbor.Val, localNeighbor.Clone()) //cas
 		neighborsChan <- neighborClone.(*Node)
 		if !loaded {
-			wg.Add(1)
-			wp.Submit(func() (interface{}, error) {
-				defer wg.Done()
-				// // fmt.Printf("send neightbor clone %d to neighbour %d\n", neighborClone.(*Node).Val, node.Val)
-
-				neighborCloneNeightborsChan, err := dfsCloneWithWorkerPool(localNeighbor, neighborClone.(*Node), visited, wg, wp)
-				return func() (interface{}, error) {
-					defer wg.Done()
-					for i := 0; i < len(neighborClone.(*Node).Neighbors); i++ {
-						neighborClone.(*Node).Neighbors[i] = <-neighborCloneNeightborsChan
-					}
-					close(neighborCloneNeightborsChan)
-					return nil, nil
-				}, err
-			})
+			submitTasks(localNeighbor, neighborClone.(*Node), visited, wg, wp)
 		}
 	}
 	return neighborsChan, nil
@@ -93,4 +80,149 @@ func processResults(wp *WorkerPool, wg *sync.WaitGroup) {
 			return
 		}
 	}
+}
+
+type minEdgeReversalsResult struct {
+	NodeId int
+	min    int
+}
+
+// --------
+// Functional helpers
+// TODO: export to fp package
+func reduce(slice []*TreeNode, initial int, fn func(acc int, value *TreeNode) int) int {
+	accumulator := initial
+	for _, value := range slice {
+		accumulator = fn(accumulator, value)
+	}
+	return accumulator
+}
+
+func mapFunc(slice []*Node, fn func(value *Node) interface{}) []interface{} {
+	result := make([]interface{}, len(slice))
+	for i, value := range slice {
+		result[i] = fn(value)
+	}
+	return result
+}
+
+// Helper function to check if a slice contains a specific value
+func contains(slice []int, val int) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
+}
+
+func minEdgeReversalsWithWorkerPool(n int, edges [][]int) []int {
+	nodesMap := InitGraphWithNodesAndEdges(n, edges, false)
+	count := make([]int, n)
+
+	var dfs func(node *Node, visited map[int]bool) int
+
+	dfs = func(node *Node, visited map[int]bool) int {
+		count := 0
+		visited[node.Val] = true
+		for i := range node.Neighbors {
+			if !visited[node.Neighbors[i].Val] {
+
+				neighborVals := mapFunc(nodesMap[node.Val].Neighbors, func(value *Node) interface{} { return value.Val })
+				intNeighborVals := make([]int, len(neighborVals))
+				for i, val := range neighborVals {
+					intNeighborVals[i] = val.(int)
+				}
+
+				if !contains(intNeighborVals, node.Neighbors[i].Val) {
+					count += 1
+				}
+				count += dfs(node.Neighbors[i], visited)
+			}
+		}
+
+		return count
+	}
+
+	workerPool := NewWorkerPool(1, n*n*n, 10*time.Second)
+
+	for i := 0; i < n; i++ {
+		nodeId := i
+		task := func() (interface{}, error) {
+			rootNodeI := GenTreeFromEdges(n, edges, nodeId)
+			visited := make(map[int]bool)
+			min := dfs(rootNodeI, visited)
+			return minEdgeReversalsResult{NodeId: nodeId, min: min}, nil
+		}
+		workerPool.Submit(task)
+	}
+
+	for i := 0; i < n; i++ {
+		taskResult := <-workerPool.resultChan
+		if taskResult.Error != nil {
+			fmt.Errorf("task error")
+		}
+		count[taskResult.Result.(minEdgeReversalsResult).NodeId] = taskResult.Result.(minEdgeReversalsResult).min
+		// fmt.Printf("task id: %d, result: %d\n", taskResult.Result.(minEdgeReversalsResult).NodeId, taskResult.Result.(minEdgeReversalsResult).min)
+	}
+	return count
+}
+
+// V2
+// ----------------------
+func minEdgeReversalsWithWorkerPoolV2(n int, edges [][]int) []int {
+
+	treeMap := InitGraphWithEdgesInfoV2(n, edges)
+	count := make([]int, n)
+
+	var dfs func(node int, visited map[int]bool, treeMap map[int]map[int]int) int
+
+	dfs = func(node int, visited map[int]bool, treeMap map[int]map[int]int) int {
+		count := 0
+		visited[node] = true
+		for k, v := range treeMap[node] {
+			if !visited[k] {
+				if v != 1 {
+					count += 1
+				}
+				count += dfs(k, visited, treeMap)
+			}
+		}
+
+		return count
+	}
+
+	workerPool := NewWorkerPool(10, n*n*n, 10*time.Second)
+
+	for i := 0; i < n; i++ {
+		nodeId := i
+		task := func() (interface{}, error) {
+			visited := make(map[int]bool)
+			min := dfs(nodeId, visited, treeMap)
+			return minEdgeReversalsResult{NodeId: nodeId, min: min}, nil
+		}
+		workerPool.Submit(task)
+	}
+
+	for i := 0; i < n; i++ {
+		taskResult := <-workerPool.resultChan
+		if taskResult.Error != nil {
+			fmt.Errorf("task error")
+		}
+		count[taskResult.Result.(minEdgeReversalsResult).NodeId] = taskResult.Result.(minEdgeReversalsResult).min
+	}
+	return count
+}
+
+func InitGraphWithEdgesInfoV2(nodesNum int, edges [][]int) map[int]map[int]int {
+	nodes_map := make(map[int]map[int]int)
+	for i := 0; i < nodesNum; i++ {
+		nodes_map[i] = make(map[int]int)
+	}
+
+	for i := range edges {
+		nodes_map[edges[i][0]][edges[i][1]] = 1
+		nodes_map[edges[i][1]][edges[i][0]] = 0
+	}
+	return nodes_map
 }

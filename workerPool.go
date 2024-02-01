@@ -77,37 +77,23 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 		select {
 		case <-wp.ctx.Done(): // Check if context was cancelled (pool is stopping)
 			return
+		case <-time.After(wp.config.Timeout):
+			fmt.Printf("worker %d timed out\n", id)
+			return
 		case <-stopChan: // Check if this specific worker was told to stop
 			return
-		// case <-time.Tick(1 * time.Second):
-		// 	fmt.Printf("worker %d is idle\n", id)
 		case task, ok := <-wp.publishers: // Wait for a task
 			if !ok {
 				// The publishers channel was closed, no more tasks will come
 				return
 			}
 			if task.Task != nil {
-				fmt.Printf("worker %d is working on task %d\n", id, task.TaskId)
+				// fmt.Printf("worker %d is working on task %d\n", id, task.TaskId)
 				result, err := task.Task()
 
 				if err != nil {
 					fmt.Printf("worker %d error on task %d: %v\n", id, task.TaskId, err)
 				}
-				// if result != nil {
-				// 	taskResult := SubmitResult{
-				// 		TaskId: task.TaskId,
-				// 		Result: result,
-				// 		Error:  err,
-				// 	}
-
-				// 	select {
-				// 	case wp.resultChan <- taskResult:
-				// 		// Task sent successfully
-				// 	default:
-				// 		// Channel is full, handle the case when the channel is full
-				// 		fmt.Println("resultChan is full, cannot send result")
-				// 	}
-				// }
 
 				if result == nil {
 					continue
@@ -159,7 +145,7 @@ loop:
 			fmt.Println("publishers Channel is full, cannot send task")
 		}
 	}
-	fmt.Printf("worker pool submitted task %d\n", taskId)
+	// fmt.Printf("worker pool submitted task %d\n", taskId)
 	return taskId, wp.resultChan, nil
 }
 
@@ -182,7 +168,9 @@ func (wp *WorkerPool) Stop() {
 	// Close the publishers channel to signal no more tasks will be sent.
 	// This is safe only after we have ensured all workers have stopped.
 	close(wp.publishers)
+	close(wp.resultChan)
 
+	//TODO: Drain the resultChan.
 	// Optionally, you can also drain the resultChan here if needed,
 	// and possibly close it if no more results will be processed.
 	// Be aware that closing a channel while it is still being written to
