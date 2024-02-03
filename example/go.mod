@@ -2,9 +2,7 @@ module workerpool_example
 
 go 1.21.6
 
-require github.com/MohanL/workerpool v0.0.3
-
-replace github.com/MohanL/workerpool => ../workerpool
+require github.com/MohanL/workerpool v0.0.4
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
