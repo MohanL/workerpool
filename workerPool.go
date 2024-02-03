@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // TaskFunc is the type of function that can be submitted to the worker pool.
@@ -54,6 +58,7 @@ type WorkerPool struct {
 	taskId          atomic.Int64
 	resultChan      chan SubmitResult
 	logger          Logger
+	stats           map[string]prometheus.Metric
 }
 
 func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
@@ -75,18 +80,56 @@ func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
 		pool.logger = &defaultLogger{}
 	}
 
+	psRunningWorkers := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "worker_pool_running_workers",
+		Help: "The total number of running worker",
+	})
+
+	psTotalSubmittedTasks := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "worker_pool_total_submitted_tasks",
+		Help: "The total number of tasks submitted to the worker pool",
+	})
+
+	psTotalExecutedTasks := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "worker_pool_total_executed_tasks",
+		Help: "The total number of tasks executed by the worker pool",
+	})
+
+	psTasksQueueSize := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "worker_pool_tasks_queue_size",
+		Help: "The size of the tasks queue",
+	})
+
+	// Register it with the default registry
+	prometheus.MustRegister(psRunningWorkers)
+	prometheus.MustRegister(psTotalSubmittedTasks)
+	prometheus.MustRegister(psTotalExecutedTasks)
+	prometheus.MustRegister(psTasksQueueSize)
+
+	pool.stats = make(map[string]prometheus.Metric)
+	pool.stats["psTotalSubmittedTasks"] = psTotalSubmittedTasks
+	pool.stats["psTotalExecutedTasks"] = psTotalExecutedTasks
+	pool.stats["psRunningWorkers"] = psRunningWorkers
+	pool.stats["psTasksQueueSize"] = psTasksQueueSize
+
 	for i := 0; i < workerPoolConfig.MaxWorkers; i++ {
 		stopChan := make(chan bool)
 		pool.workerStopChans[i] = stopChan
 		pool.wg.Add(1)
+		psRunningWorkers.Inc()
 		go pool.worker(i+1, stopChan)
 	}
+
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(":8080", nil)
 	return pool
 }
 
 // worker is a method on the WorkerPool that processes tasks from the taskQueue.
 func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 	defer wp.wg.Done()
+	// TODO: do I need this??
+	// defer wp.stats["psRunningWorkers"].Dec()
 	defer wp.logger.Log(fmt.Sprintf("worker %d stopped\n", id))
 
 	for {
@@ -103,6 +146,12 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 				// The publishers channel was closed, no more tasks will come
 				return
 			}
+
+			gauge, ok := wp.stats["psTasksQueueSize"].(prometheus.Gauge)
+			if ok {
+				gauge.Inc()
+			}
+
 			if task.Task != nil {
 				wp.logger.Log(fmt.Sprintf("worker %d is working on task %d\n", id, task.TaskId))
 				result, err := task.Task()
@@ -110,7 +159,10 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 				if err != nil {
 					wp.logger.Log(fmt.Sprintf("worker %d error on task %d: %v\n", id, task.TaskId, err))
 				}
-
+				counter, ok := wp.stats["psTotalExecutedTasks"].(prometheus.Counter)
+				if ok {
+					counter.Inc()
+				}
 				if result == nil {
 					continue
 				}
@@ -145,7 +197,10 @@ func (wp *WorkerPool) Submit(task TaskFunc) (int64, <-chan SubmitResult, error) 
 		return 0, nil, errors.New("worker pool is not accepting new tasks")
 	}
 	taskId := wp.taskId.Add(1)
-
+	counter, ok := wp.stats["psTotalSubmittedTasks"].(prometheus.Counter)
+	if ok {
+		counter.Inc()
+	}
 	TaskFuncWithId := TaskFuncWithId{
 		Task:   task,
 		TaskId: taskId,
@@ -156,6 +211,10 @@ loop:
 		select {
 		case wp.publishers <- TaskFuncWithId:
 			// Task sent successfully
+			gauge, ok := wp.stats["psTasksQueueSize"].(prometheus.Gauge)
+			if ok {
+				gauge.Inc()
+			}
 			break loop
 		default:
 			// Channel is full, handle the case when the channel is full
