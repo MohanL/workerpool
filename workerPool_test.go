@@ -2,25 +2,23 @@ package workerpool
 
 import (
 	"fmt"
-	"os"
-	"runtime/trace"
 	"testing"
 	"time"
 )
 
 func TestWorkerPoolSubmit(t *testing.T) {
 
-	f, err := os.Create("trace.out")
-	if err != nil {
-		t.Fatalf("failed to create trace output file: %v", err)
-	}
-	defer f.Close()
+	// f, err := os.Create("trace.out")
+	// if err != nil {
+	// 	t.Fatalf("failed to create trace output file: %v", err)
+	// }
+	// defer f.Close()
 
-	err = trace.Start(f)
-	if err != nil {
-		t.Fatalf("failed to start trace: %v", err)
-	}
-	defer trace.Stop()
+	// err = trace.Start(f)
+	// if err != nil {
+	// 	t.Fatalf("failed to start trace: %v", err)
+	// }
+	// defer trace.Stop()
 
 	maxWorkers := 4
 	taskQueueSize := 100
@@ -45,7 +43,7 @@ func TestWorkerPoolSubmit(t *testing.T) {
 
 	// this is blocking
 	for i := 0; i < taskNums; i++ {
-		taskResult := <-workerPool.resultChan
+		taskResult := <-workerPool.ResultChan
 		if taskResult.Error != nil {
 			t.Error(taskResult.Error)
 		}

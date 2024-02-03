@@ -56,7 +56,7 @@ type WorkerPool struct {
 	publishers      chan TaskFuncWithId
 	workerStopChans []chan bool
 	taskId          atomic.Int64
-	resultChan      chan SubmitResult
+	ResultChan      chan SubmitResult
 	logger          Logger
 	stats           map[string]prometheus.Metric
 }
@@ -71,7 +71,7 @@ func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
 		publishers:      make(chan TaskFuncWithId, workerPoolConfig.TaskQueueSize),
 		workerStopChans: make([]chan bool, workerPoolConfig.MaxWorkers),
 		taskId:          atomic.Int64{},
-		resultChan:      make(chan SubmitResult, workerPoolConfig.TaskQueueSize),
+		ResultChan:      make(chan SubmitResult, workerPoolConfig.TaskQueueSize),
 	}
 
 	if workerPoolConfig.Logger != nil {
@@ -176,7 +176,7 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 			loop:
 				for {
 					select {
-					case wp.resultChan <- taskResult:
+					case wp.ResultChan <- taskResult:
 						// Task sent successfully
 						break loop
 					default:
@@ -222,7 +222,7 @@ loop:
 		}
 	}
 	wp.logger.Log(fmt.Sprintf("worker pool submitted task %d\n", taskId))
-	return taskId, wp.resultChan, nil
+	return taskId, wp.ResultChan, nil
 }
 
 func (wp *WorkerPool) WaitAll() {
@@ -244,7 +244,7 @@ func (wp *WorkerPool) Stop() {
 	// Close the publishers channel to signal no more tasks will be sent.
 	// This is safe only after we have ensured all workers have stopped.
 	close(wp.publishers)
-	close(wp.resultChan)
+	close(wp.ResultChan)
 
 	//TODO: Drain the resultChan.
 	// Optionally, you can also drain the resultChan here if needed,

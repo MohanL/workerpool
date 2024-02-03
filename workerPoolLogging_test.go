@@ -32,7 +32,7 @@ func TestWorkerPoolZapLogger(t *testing.T) {
 
 	// this is blocking
 	for i := 0; i < taskNums; i++ {
-		taskResult := <-workerPool.resultChan
+		taskResult := <-workerPool.ResultChan
 		if taskResult.Error != nil {
 			t.Error(taskResult.Error)
 		}
