@@ -1,4 +1,4 @@
-module example.com/workerPool
+module github.com/MohanL/workerpool
 
 go 1.21.0
 
