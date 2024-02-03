@@ -11,7 +11,7 @@ func main() {
 
 	maxWorkers := 4
 	taskQueueSize := 200
-	timeout := 5 * time.Second
+	timeout := 3 * time.Second
 	taskNums := 100
 
 	workerPoolConfig := WorkerPoolConfig{
@@ -22,15 +22,18 @@ func main() {
 	workerPool := NewWorkerPool(workerPoolConfig)
 	// TODO: task arguments setup
 	task := func() (interface{}, error) {
-		fmt.Println("hello")
-		return "hello result", nil
+		return "hello", nil
 	}
 
 	for i := 0; i < taskNums; i++ {
 		workerPool.Submit(task)
 	}
 
-	workerPool.WaitAll()
+	for i := 0; i < taskNums; i++ {
+		taskResult := <-workerPool.ResultChan
+		fmt.Printf(
+			"task id: %d, result: %s\n", taskResult.TaskId, taskResult.Result)
+	}
 	workerPool.Stop()
 	fmt.Println("worker pool stopped")
 }

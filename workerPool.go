@@ -59,9 +59,11 @@ type WorkerPool struct {
 	ResultChan      chan SubmitResult
 	logger          Logger
 	stats           map[string]prometheus.Metric
+	server          *http.Server
 }
 
 func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pool := &WorkerPool{
@@ -120,9 +122,47 @@ func NewWorkerPool(workerPoolConfig WorkerPoolConfig) *WorkerPool {
 		go pool.worker(i+1, stopChan)
 	}
 
-	http.Handle("/metrics", promhttp.Handler())
-	http.ListenAndServe(":8080", nil)
+	go pool.startPrometheus()
 	return pool
+}
+
+func (wp *WorkerPool) startPrometheus() {
+	// Create a ServeMux and register the Prometheus handler
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// Create the server with the custom ServeMux
+	wp.server = &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	// Run the server in a goroutine so that it doesn't block
+	go func() {
+		if err := wp.server.ListenAndServe(); err != http.ErrServerClosed {
+			// Handle error
+			panic(err)
+		}
+	}()
+
+	// Set up a channel to listen for OS signals for graceful shutdown
+	// stop := make(chan os.Signal, 1)
+	// signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Block until a signal is received
+	<-wp.ctx.Done()
+	wp.logger.Log("prometheus server stopped")
+	// Create a context with a timeout for the shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Gracefully shutdown the server, waiting for any in-flight requests to complete
+	if err := wp.server.Shutdown(ctx); err != nil {
+		// Handle error
+		panic(err)
+	}
+
+	wp.logger.Log("prometheus server stopped")
 }
 
 // worker is a method on the WorkerPool that processes tasks from the taskQueue.
@@ -227,6 +267,7 @@ loop:
 
 func (wp *WorkerPool) WaitAll() {
 	wp.wg.Wait()
+	wp.logger.Log("all tasks completed")
 }
 
 func (wp *WorkerPool) Stop() {

@@ -4,6 +4,8 @@ go 1.21.6
 
 require github.com/MohanL/workerpool v0.0.3
 
+replace github.com/MohanL/workerpool => ../workerpool
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
