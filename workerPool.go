@@ -189,7 +189,7 @@ func (wp *WorkerPool) worker(id int, stopChan chan bool) {
 
 			gauge, ok := wp.stats["psTasksQueueSize"].(prometheus.Gauge)
 			if ok {
-				gauge.Inc()
+				gauge.Dec()
 			}
 
 			if task.Task != nil {
